@@ -1,0 +1,74 @@
+name: Deploy Infra for Barbell Nonlive
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Import Secrets
+        uses: hashicorp/vault-action@v2
+        with:
+          url: ${{ secrets.BARBELL_VAULT_URL }}
+          token: ${{ secrets.BARBELL_VAULT_AUTH_TOKEN }}
+          method: token
+          secrets: |
+            secret/data/barbell BB_DB_DATABASE | BB_DB_DATABASE ;
+            secret/data/barbell BB_DB_PASSWORD | BB_DB_PASSWORD ;
+            secret/data/barbell BB_DB_PORT | BB_DB_PORT;
+            secret/data/barbell BB_DB_ROOT_PASSWORD | BB_DB_ROOT_PASSWORD;
+            secret/data/barbell BB_DB_USER | BB_DB_USER;
+            secret/data/barbell BB_RABBITMQ_HTTP_PORT | BB_RABBITMQ_HTTP_PORT;
+            secret/data/barbell BB_RABBITMQ_PASSWORD | BB_RABBITMQ_PASSWORD;
+            secret/data/barbell BB_RABBITMQ_PORT | BB_RABBITMQ_PORT;
+            secret/data/barbell BB_RABBITMQ_USER | BB_RABBITMQ_USER;
+            secret/data/barbell BB_REDIS_PORT | BB_REDIS_PORT;
+
+      - name: Create .env file from Vault secrets
+        run: |
+          cat <<EOF > barbell/.env
+          BB_DB_DATABASE=${{ env.BB_DB_DATABASE }}
+          BB_DB_PASSWORD=${{ env.BB_DB_PASSWORD }}
+          BB_DB_PORT=${{ env.BB_DB_PORT }}
+          BB_DB_ROOT_PASSWORD=${{ env.BB_DB_ROOT_PASSWORD }}
+          BB_DB_USER=${{ env.BB_DB_USER }}
+          BB_RABBITMQ_HTTP_PORT=${{ env.BB_RABBITMQ_HTTP_PORT }}
+          BB_RABBITMQ_PASSWORD=${{ env.BB_RABBITMQ_PASSWORD }}
+          BB_RABBITMQ_PORT=${{ env.BB_RABBITMQ_PORT }}
+          BB_RABBITMQ_USER=${{ env.BB_RABBITMQ_USER }}
+          BB_REDIS_PORT=${{ env.BB_REDIS_PORT }}
+          EOF
+
+      - name: Copy Files to Server
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_PRIVATE }}
+          port: ${{ secrets.SERVER_PORT }}
+          source: "barbell/"
+          target: "/home/${{ secrets.SERVER_USER }}/infra"
+
+      - name: Roll out Infra
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_PRIVATE }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            cd "/home/${{ secrets.SERVER_USER }}/infra/barbell/scripts"
+            chmod +x create_docker_network.sh
+            ./create_docker_network.sh
+            
+            cd "/home/${{ secrets.SERVER_USER }}/infra/barbell"
+            
+            docker compose up -d
+            
+            cd "/home/${{ secrets.SERVER_USER }}/infra"
+            rm -rf barbell
